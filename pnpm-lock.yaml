@@ -1,0 +1,22 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      pipx:
+        specifier: ^1.0.1
+        version: 1.0.1
+
+packages:
+
+  pipx@1.0.1:
+    resolution: {integrity: sha512-mp9BRGzPtW1fENFrt4rxVkdpd/oaIyOJRq7UiK9Ftuv4McvEae5gSB13W1JzsozpQdMYC3api+X0XmUL3hZziw==}
+
+snapshots:
+
+  pipx@1.0.1: {}
