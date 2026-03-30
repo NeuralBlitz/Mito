@@ -1850,6 +1850,9 @@ GET /tools
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
+Token issuance: call `POST /token` with OAuth2PasswordRequestForm fields (username/password). Set `MITO_JWT_PRIVATE_KEY` for RS256 signing or `MITO_JWT_SECRET` for HS256; TTL via `MITO_JWT_TTL` (default 3600s).
+Optional credential checks: set `MITO_JWT_PASSWORD` for a shared password or `MITO_JWT_USERS` as a JSON map of username->password. Refresh tokens via `POST /token/refresh` (requires valid bearer) with TTL `MITO_JWT_REFRESH_TTL` (default 86400s).
+
 ### Rate Limiting
 
 The API includes built-in rate limiting:

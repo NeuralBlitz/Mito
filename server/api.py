@@ -4,7 +4,7 @@ FastAPI server for Mito AI toolkit
 """
 
 from fastapi import FastAPI, HTTPException, File, UploadFile, Depends, Request, Response
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt, JWTError
 from fastapi.middleware.cors import CORSMiddleware
 from config.observability import RateLimiter, APIKeyManager, track_metrics, get_metrics
@@ -37,10 +37,15 @@ app.add_middleware(
 
 API_KEY_ENV = os.getenv("MITO_API_KEY")
 API_KEY_HEADER = "X-API-Key"
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token", auto_error=False)
 JWT_ISSUER = os.getenv("MITO_JWT_ISSUER")
 JWT_AUDIENCE = os.getenv("MITO_JWT_AUDIENCE")
 JWT_PUBLIC_KEY = os.getenv("MITO_JWT_PUBLIC_KEY")
+JWT_PRIVATE_KEY = os.getenv("MITO_JWT_PRIVATE_KEY")
+JWT_SECRET = os.getenv("MITO_JWT_SECRET")
+JWT_PASSWORD = os.getenv("MITO_JWT_PASSWORD")
+JWT_USERS = os.getenv("MITO_JWT_USERS")
+JWT_REFRESH_TTL = int(os.getenv("MITO_JWT_REFRESH_TTL", "86400"))
 api_keys = APIKeyManager()
 limiter = RateLimiter(rate=int(os.getenv("MITO_RATE_LIMIT", "120")), period=60)
 if API_KEY_ENV:
@@ -62,19 +67,48 @@ def enforce_rate_limit(request: Request):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
     return None
 
-def validate_jwt(token: str = Depends(oauth2_scheme)):
+def validate_jwt(token: Optional[str] = Depends(oauth2_scheme)):
     if API_KEY_ENV is None:
         return token  # allow passthrough when API key is disabled
     if not token:
         raise HTTPException(status_code=401, detail="Missing bearer token")
-    if JWT_PUBLIC_KEY:
-        try:
-            claims = jwt.decode(token, JWT_PUBLIC_KEY, algorithms=["RS256"], audience=JWT_AUDIENCE, issuer=JWT_ISSUER)
-            return claims
-        except JWTError as e:
-            raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+    try:
+        if JWT_PUBLIC_KEY:
+            return jwt.decode(token, JWT_PUBLIC_KEY, algorithms=["RS256"], audience=JWT_AUDIENCE, issuer=JWT_ISSUER)
+        if JWT_SECRET:
+            return jwt.decode(token, JWT_SECRET, algorithms=["HS256"], audience=JWT_AUDIENCE, issuer=JWT_ISSUER)
+    except JWTError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
     return token
 
+
+def _verify_credentials(username: str, password: str) -> bool:
+    if JWT_USERS:
+        try:
+            users = json.loads(JWT_USERS)
+            return users.get(username) == password
+        except Exception:
+            return False
+    if JWT_PASSWORD:
+        return password == JWT_PASSWORD
+    return True  # allow when no credential config provided
+
+
+def _issue_token(sub: str, scopes, ttl: int = None):
+    now = int(time.time())
+    exp = now + (ttl or int(os.getenv("MITO_JWT_TTL", "3600")))
+    payload = {"sub": sub, "scope": scopes, "iat": now, "exp": exp}
+    if JWT_ISSUER:
+        payload["iss"] = JWT_ISSUER
+    if JWT_AUDIENCE:
+        payload["aud"] = JWT_AUDIENCE
+    if JWT_PRIVATE_KEY:
+        token = jwt.encode(payload, JWT_PRIVATE_KEY, algorithm="RS256")
+    elif JWT_SECRET:
+        token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    else:
+        raise HTTPException(status_code=501, detail="JWT signing not configured; set MITO_JWT_PRIVATE_KEY or MITO_JWT_SECRET")
+    return token, exp
 
 
 class GenerateRequest(BaseModel):
@@ -120,6 +154,24 @@ def root():
         "version": VERSION,
         "status": "running"
     }
+
+@app.post("/token")
+async def token_endpoint(form_data: OAuth2PasswordRequestForm = Depends(), api_key: str = Depends(require_api_key)):
+    """Issue JWT bearer tokens after simple credential validation."""
+    if not _verify_credentials(form_data.username, form_data.password or ""):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token, exp = _issue_token(form_data.username, form_data.scopes)
+    return {"access_token": token, "token_type": "bearer", "expires_in": exp - int(time.time())}
+@app.post("/token/refresh")
+async def token_refresh(claims: dict = Depends(validate_jwt), api_key: str = Depends(require_api_key)):
+    """Refresh an existing JWT (requires valid bearer token)."""
+    sub = claims.get("sub") if isinstance(claims, dict) else None
+    scopes = claims.get("scope", []) if isinstance(claims, dict) else []
+    if not sub:
+        raise HTTPException(status_code=400, detail="Missing subject in token")
+    token, exp = _issue_token(sub, scopes, ttl=JWT_REFRESH_TTL)
+    return {"access_token": token, "token_type": "bearer", "expires_in": exp - int(time.time())}
+
 
 
 @app.get("/tools")
