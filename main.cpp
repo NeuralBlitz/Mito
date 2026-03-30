@@ -143,11 +143,15 @@ namespace {
         }
     };
 
-    void runInteractive(const std::string& modelPath, int threads, int context, float temp) {
+    void runInteractive(const std::string& modelPath, int threads, int context, float temp,
+                        float top_p, int top_k, int max_tokens) {
         LlamaContext llama;
         llama.n_threads = threads;
         llama.n_ctx = context;
         llama.temperature = temp;
+        llama.top_p = top_p;
+        llama.top_k = top_k;
+        llama.max_tokens = max_tokens;
 
         if (!llama.load(modelPath)) {
             return;
@@ -181,11 +185,15 @@ namespace {
     }
 
     void runPrompt(const std::string& modelPath, const std::string& prompt,
-                   int threads, int context, float temp) {
+                   int threads, int context, float temp,
+                   float top_p, int top_k, int max_tokens) {
         LlamaContext llama;
         llama.n_threads = threads;
         llama.n_ctx = context;
         llama.temperature = temp;
+        llama.top_p = top_p;
+        llama.top_k = top_k;
+        llama.max_tokens = max_tokens;
 
         if (!llama.load(modelPath)) {
             return;
@@ -196,8 +204,10 @@ namespace {
         std::cout << response << "\n";
     }
 #else
-    void runInteractive(const std::string& modelPath, int threads, int context, float temp) {
+    void runInteractive(const std::string& modelPath, int threads, int context, float temp,
+                        float top_p, int top_k, int max_tokens) {
         (void)threads; (void)context; (void)temp;
+        (void)top_p; (void)top_k; (void)max_tokens;
         std::cout << "Starting interactive mode with model: " << modelPath << "\n";
         std::cout << "Type 'quit' or 'exit' to stop.\n\n";
         std::cout << "[Stub] Build with llama.cpp to enable inference.\n";
@@ -224,8 +234,10 @@ namespace {
     }
 
     void runPrompt(const std::string& modelPath, const std::string& prompt,
-                   int threads, int context, float temp) {
+                   int threads, int context, float temp,
+                   float top_p, int top_k, int max_tokens) {
         (void)threads; (void)context; (void)temp;
+        (void)top_p; (void)top_k; (void)max_tokens;
         std::cout << "Model: " << modelPath << "\n";
         std::cout << "Prompt: " << prompt << "\n\n";
         std::cout << "[Stub] Build with llama.cpp to enable inference.\n";
@@ -243,8 +255,6 @@ int main(int argc, char* argv[]) {
     float top_p = 0.95f;
     int top_k = 40;
     int max_tokens = 128;
-    (void)top_p; (void)top_k; (void)max_tokens;
-
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
 
@@ -316,9 +326,9 @@ int main(int argc, char* argv[]) {
     }
 
     if (interactive) {
-        runInteractive(modelPath, threads, context, temp);
+        runInteractive(modelPath, threads, context, temp, top_p, top_k, max_tokens);
     } else if (!prompt.empty()) {
-        runPrompt(modelPath, prompt, threads, context, temp);
+        runPrompt(modelPath, prompt, threads, context, temp, top_p, top_k, max_tokens);
     } else {
         std::cerr << "Error: Either -p <prompt> or -i (interactive) required.\n";
         std::cerr << "Run with -h for help.\n";

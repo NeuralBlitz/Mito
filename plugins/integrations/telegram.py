@@ -100,3 +100,12 @@ PLUGIN_METADATA = {
 }
 
 telegram_plugin = {"metadata": PLUGIN_METADATA, "register": register}
+
+
+class TelegramClient:
+    def __init__(self, token: str = "", base_url: str = "https://api.telegram.org"):
+        self.token = token
+        self.base_url = base_url
+
+    def _headers(self):
+        return {"Authorization": f"Bearer {self.token}"} if self.token else {}

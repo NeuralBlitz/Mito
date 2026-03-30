@@ -4,8 +4,8 @@
   <img src="https://img.shields.io/badge/version-1.0.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/python-3.11+-green.svg" alt="Python">
   <img src="https://img.shields.io/badge/C%2B%2B-17-blue.svg" alt="C++">
-  <img src="https://img.shields.io/badge/tests-230-brightgreen.svg" alt="Tests">
-  <img src="https://img.shields.io/badge/plugins-276-orange.svg" alt="Plugins">
+  <img src="https://img.shields.io/badge/tests-231-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/plugins-316-orange.svg" alt="Plugins">
   <img src="https://img.shields.io/badge/modules-36-purple.svg" alt="Modules">
   <img src="https://img.shields.io/badge/license-MIT-orange.svg" alt="License">
   <img src="https://img.shields.io/badge/llama.cpp-integrated-yellow.svg" alt="llama.cpp">
@@ -48,7 +48,7 @@ Mito is a unified AI toolkit that combines:
 - **8 specialized agent types** for autonomous task execution
 - **36 core infrastructure modules** for production-ready systems
 - **C++ inference engine** with llama.cpp integration for high-performance LLM inference
-- **REST API server** with comprehensive middleware stack
+- **REST API server** with comprehensive CORS-only middleware right now
 - **Enterprise-grade features** including authentication, audit logging, resilience patterns, and more
 
 ### Design Philosophy
@@ -95,14 +95,14 @@ Mito follows these core principles:
 - **Event Bus**: Typed events, middleware, persistence
 - **Workflow Engine**: DAG-based execution with retries and parallel steps
 - **Scheduler**: Cron, interval, and one-shot tasks with daemon mode
-- **Resilience Patterns**: Circuit breaker, retry, bulkhead, timeout, fallback
+- **Resilience patterns (not enabled in API)**: Circuit breaker, retry, bulkhead, timeout, fallback
 - **Configuration System**: Validation, profiles, hot reload, environment overrides
 - **Audit Logging**: Immutable logs with integrity checks and compliance features
 - **Session Management**: TTL-based storage with multi-backend support
 - **Middleware Stack**: CORS, authentication, rate limiting, security headers
 
 ### 🔐 Security & Compliance
-- **Authentication**: JWT, OAuth, API keys, Auth0, Okta, Clerk
+- **Authentication (API key via MITO_API_KEY)**: Single key via MITO_API_KEY (JWT/OAuth not implemented)
 - **Encryption**: AES, Fernet, bcrypt, argon2, scrypt, PBKDF2
 - **Audit Trails**: Immutable logs with integrity verification
 - **Rate Limiting**: Configurable request throttling
@@ -130,7 +130,7 @@ Mito follows these core principles:
 ├─────────────────────────────────────────────────────────────┤
 │                      Plugin System                          │
 │  ┌─────────────────────────────────────────────────────────┐│
-│  │ 276 Integration Plugins (Communication, CRM, DevOps...)││
+│  │ 316 Integration Plugins (Communication, CRM, DevOps...)││
 │  └─────────────────────────────────────────────────────────┘│
 ├─────────────────────────────────────────────────────────────┤
 │                      Agent Framework                        │
@@ -140,7 +140,7 @@ Mito follows these core principles:
 ├─────────────────────────────────────────────────────────────┤
 │                      API Server (FastAPI)                    │
 │  ┌─────────────────────────────────────────────────────────┐│
-│  │ REST Endpoints │ Middleware │ Authentication │ Rate Limit││
+│  │ REST Endpoints │ Middleware │ API Key (X-API-Key) │ Rate Limit││
 │  └─────────────────────────────────────────────────────────┘│
 ├─────────────────────────────────────────────────────────────┤
 │                     C++ Inference Engine                     │
@@ -178,7 +178,7 @@ mito/
 ├── resilience/          # Resilience patterns
 ├── crypto/              # Cryptography utilities
 ├── config/              # Configuration system
-├── audit/               # Audit logging
+├── audit/               # Audit logging (not exposed via API)
 ├── plugins/             # Plugin system
 ├── middleware/           # Server middleware
 ├── vectorstores/        # Vector search
@@ -1061,7 +1061,7 @@ print(f"Available profiles: {profiles}")
 manager.load_profile("production")
 ```
 
-#### Resilience Patterns
+#### Resilience patterns (not enabled in API)
 ```python
 from resilience import (
     CircuitBreaker, Retry, Bulkhead, Timeout, Fallback,
@@ -1834,7 +1834,7 @@ Content-Type: multipart/form-data
 file: <audio_file>
 ```
 
-### API Authentication
+### API Authentication (API key)
 
 The API supports multiple authentication methods:
 
@@ -1872,7 +1872,7 @@ api:
 The API includes these middleware components:
 1. **CORS Middleware** - Cross-origin resource sharing
 2. **Rate Limiting Middleware** - Request throttling
-3. **Authentication Middleware** - API key/JWT validation
+3. **Authentication (API key via MITO_API_KEY) Middleware** - API key/JWT validation
 4. **Security Headers Middleware** - XSS, CSRF protection
 5. **Request ID Middleware** - Unique request tracking
 6. **Logging Middleware** - Request/response logging
@@ -1947,9 +1947,9 @@ The API includes these middleware components:
 - ArgoCD - GitOps CD
 
 #### Auth & Identity (8)
-- Auth0 - Authentication platform
+- Auth0 - authentication (not implemented)
 - Okta - Identity management
-- Clerk - Authentication
+- Clerk - authentication (not implemented)
 - WorkOS - Enterprise SSO
 - Stytch - Passwordless auth
 - FusionAuth - Identity platform

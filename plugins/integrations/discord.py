@@ -86,3 +86,11 @@ PLUGIN_METADATA = {
 }
 
 discord_plugin = {"metadata": PLUGIN_METADATA, "register": register}
+
+
+class DiscordClient:
+    def __init__(self, base_url: str = "https://discord.com/api"):
+        self.base_url = base_url
+
+    def create_embed(self, title: str, description: str, color: int = 0x3498db):
+        return {"title": title, "description": description, "color": color}

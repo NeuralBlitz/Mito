@@ -84,3 +84,13 @@ PLUGIN_METADATA = {
 }
 
 twilio_plugin = {"metadata": PLUGIN_METADATA, "register": register}
+
+
+class TwilioClient:
+    def __init__(self, account_sid: str = "", auth_token: str = "", base_url: str = "https://api.twilio.com"):
+        self.account_sid = account_sid
+        self.auth_token = auth_token
+        self.base_url = base_url
+
+    def _headers(self):
+        return {}

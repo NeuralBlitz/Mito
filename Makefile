@@ -35,7 +35,7 @@ test:
 	./$(TARGET) -v
 	./$(TARGET) -h
 	@echo "Running Python tests..."
-	python -m pytest tests/ -v 2>/dev/null || echo "pytest not installed, skipping"
+	PYTHONPATH=$(PWD)/.pythonlibs/lib/python3.11/site-packages:$(PYTHONPATH) python -m pytest tests/ -v 2>/dev/null || echo "pytest not installed, skipping"
 
 install-deps:
 	@echo "To install llama.cpp, run:"

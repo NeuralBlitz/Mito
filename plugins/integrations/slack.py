@@ -98,3 +98,12 @@ PLUGIN_METADATA = {
 }
 
 slack_plugin = {"metadata": PLUGIN_METADATA, "register": register}
+
+
+class SlackClient:
+    def __init__(self, token: str = "", base_url: str = "https://slack.com/api"):
+        self.token = token
+        self.base_url = base_url
+
+    def _headers(self):
+        return {"Authorization": f"Bearer {self.token}"} if self.token else {}

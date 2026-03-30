@@ -3,13 +3,15 @@ Mito API Server
 FastAPI server for Mito AI toolkit
 """
 
-from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi import FastAPI, HTTPException, File, UploadFile, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from config.observability import RateLimiter, APIKeyManager
 from pydantic import BaseModel
 from typing import Optional, List
 import uvicorn
 import tempfile
 import os
+import base64
 
 VERSION = "1.0.0"
 
@@ -26,6 +28,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+API_KEY_ENV = os.getenv("MITO_API_KEY")
+API_KEY_HEADER = "X-API-Key"
+api_keys = APIKeyManager()
+limiter = RateLimiter(rate=int(os.getenv("MITO_RATE_LIMIT", "120")), period=60)
+if API_KEY_ENV:
+    api_keys.create_key("env-key", rate_limit=limiter.rate)
+    # replace placeholder key with actual env value
+    api_keys.keys[API_KEY_ENV] = api_keys.keys.pop(list(api_keys.keys.keys())[0])
+
+def require_api_key(request: Request):
+    if API_KEY_ENV:
+        key = request.headers.get(API_KEY_HEADER)
+        if not key or not api_keys.validate_key(key):
+            raise HTTPException(status_code=401, detail="Invalid or missing API key")
+        return key
+    return None
+
+def enforce_rate_limit(request: Request):
+    key = request.headers.get(API_KEY_HEADER) or "anonymous"
+    if not limiter.allow(key):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    return None
+
 
 
 class GenerateRequest(BaseModel):
@@ -59,6 +85,11 @@ class EmbedRequest(BaseModel):
     model: Optional[str] = "sentence-transformers/all-MiniLM-L6-v2"
 
 
+
+class TTSRequest(BaseModel):
+    text: str
+    model: Optional[str] = "tts_models/en/ljspeech/glow-tts"
+
 @app.get("/")
 def root():
     return {
@@ -88,7 +119,7 @@ def list_tools():
 
 
 @app.post("/generate")
-def generate(req: GenerateRequest):
+def generate(req: GenerateRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
     try:
         from python.ai import TextGenerator
         
@@ -101,7 +132,7 @@ def generate(req: GenerateRequest):
 
 
 @app.post("/summarize")
-def summarize(req: SummarizeRequest):
+def summarize(req: SummarizeRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
     try:
         from python.ai.summarize import Summarizer
         
@@ -114,7 +145,7 @@ def summarize(req: SummarizeRequest):
 
 
 @app.post("/translate")
-def translate(req: TranslateRequest):
+def translate(req: TranslateRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
     try:
         from python.ai.translate import Translator
         
@@ -127,7 +158,7 @@ def translate(req: TranslateRequest):
 
 
 @app.post("/qa")
-def question_answer(req: QARequest):
+def question_answer(req: QARequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
     try:
         from python.ai.qa import QAModel
         
@@ -140,7 +171,7 @@ def question_answer(req: QARequest):
 
 
 @app.post("/sentiment")
-def sentiment(req: SentimentRequest):
+def sentiment(req: SentimentRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
     try:
         from python.ai.sentiment import quick_sentiment, quick_emotion
         
@@ -157,7 +188,7 @@ def sentiment(req: SentimentRequest):
 
 
 @app.post("/embed")
-def embed(req: EmbedRequest):
+def embed(req: EmbedRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
     try:
         from python.ai.embeddings import Embedder
         
@@ -169,68 +200,81 @@ def embed(req: EmbedRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
 @app.post("/ocr")
-async def ocr(file: UploadFile = File(...)):
+async def ocr(file: UploadFile = File(...), api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
+    tmp_path = None
     try:
         from python.ai.ocr import OCREngine
-        
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
             content = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
-        
         engine = OCREngine()
         results = engine.read_text(tmp_path)
-        
-        os.unlink(tmp_path)
-        
         return {"text": [r["text"] for r in results]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 @app.post("/classify")
-async def classify(file: UploadFile = File(...)):
+async def classify(file: UploadFile = File(...), api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
+    tmp_path = None
     try:
         from python.ai.image_classify import ImageClassifier
-        
         with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
             content = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
-        
         classifier = ImageClassifier()
         results = classifier.classify(tmp_path)
-        
-        os.unlink(tmp_path)
-        
         return {"predictions": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 @app.post("/speech")
-async def speech(file: UploadFile = File(...)):
+async def speech(file: UploadFile = File(...), api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
+    tmp_path = None
     try:
         from python.ai.speech import SpeechRecognizer
-        
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
             content = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
-        
         recognizer = SpeechRecognizer()
         result = recognizer.get_text(tmp_path)
-        
-        os.unlink(tmp_path)
-        
         return {"text": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
-def run_server(host: str = "0.0.0.0", port: int = 8000):
-    uvicorn.run(app, host=host, port=port)
+@app.post("/tts")
+def tts(req: TTSRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
+    try:
+        from python.ai.tts import TTSEngine
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            tmp_path = tmp.name
+        try:
+            engine = TTSEngine(model_name=req.model)
+            output_path = engine.speak(req.text, output_path=tmp_path)
+            with open(output_path, "rb") as f:
+                audio_b64 = base64.b64encode(f.read()).decode()
+            return {"audio_base64": audio_b64, "format": "wav"}
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
