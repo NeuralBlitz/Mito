@@ -48,7 +48,7 @@ Mito is a unified AI toolkit that combines:
 - **8 specialized agent types** for autonomous task execution
 - **36 core infrastructure modules** for production-ready systems
 - **C++ inference engine** with llama.cpp integration for high-performance LLM inference
-- **REST API server** with comprehensive CORS-only middleware right now
+- **REST API server** with API key auth (`X-API-Key`), optional JWT validation, CORS, metrics, and rate limiting
 - **Enterprise-grade features** including authentication, audit logging, resilience patterns, and more
 
 ### Design Philosophy
@@ -102,7 +102,7 @@ Mito follows these core principles:
 - **Middleware Stack**: CORS, authentication, rate limiting, security headers
 
 ### 🔐 Security & Compliance
-- **Authentication (API key via MITO_API_KEY)**: Single key via MITO_API_KEY (JWT/OAuth not implemented)
+- **Authentication**: API key via `MITO_API_KEY` (`X-API-Key` header) with optional RS256 JWT validation when `MITO_JWT_PUBLIC_KEY` is set
 - **Encryption**: AES, Fernet, bcrypt, argon2, scrypt, PBKDF2
 - **Audit Trails**: Immutable logs with integrity verification
 - **Rate Limiting**: Configurable request throttling
@@ -1834,17 +1834,17 @@ Content-Type: multipart/form-data
 file: <audio_file>
 ```
 
-### API Authentication (API key)
+### API Authentication (API key + optional JWT)
 
-The API supports multiple authentication methods:
+The API supports API keys and optional JWT bearer validation:
 
-1. **API Keys** (configured in `mito.yaml`):
+1. **API Keys** (set `MITO_API_KEY`, send with `X-API-Key`):
 ```http
 GET /tools
 X-API-Key: sk_live_abc123
 ```
 
-2. **JWT Tokens**:
+2. **JWT Bearer (RS256)**: Enabled when `MITO_JWT_PUBLIC_KEY` is provided (along with optional `MITO_JWT_ISSUER` / `MITO_JWT_AUDIENCE`). Tokens are validated only when API key auth is enabled.
 ```http
 GET /tools
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
@@ -1853,8 +1853,8 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ### Rate Limiting
 
 The API includes built-in rate limiting:
-- Default: 100 requests per minute per IP
-- Configurable via `mito.yaml` or environment variables
+- Default: 120 requests per minute per key (or `anonymous`)
+- Configurable via the `MITO_RATE_LIMIT` environment variable
 - Returns `429 Too Many Requests` when limit exceeded
 
 ### CORS Configuration
@@ -1872,7 +1872,7 @@ api:
 The API includes these middleware components:
 1. **CORS Middleware** - Cross-origin resource sharing
 2. **Rate Limiting Middleware** - Request throttling
-3. **Authentication (API key via MITO_API_KEY) Middleware** - API key/JWT validation
+3. **Authentication (MITO_API_KEY + optional JWT) Middleware** - API key validation with optional RS256 JWT verification when `MITO_JWT_PUBLIC_KEY` is set
 4. **Security Headers Middleware** - XSS, CSRF protection
 5. **Request ID Middleware** - Unique request tracking
 6. **Logging Middleware** - Request/response logging

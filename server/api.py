@@ -3,9 +3,11 @@ Mito API Server
 FastAPI server for Mito AI toolkit
 """
 
-from fastapi import FastAPI, HTTPException, File, UploadFile, Depends, Request
+from fastapi import FastAPI, HTTPException, File, UploadFile, Depends, Request, Response
+from fastapi.security import OAuth2PasswordBearer
+from jose import jwt, JWTError
 from fastapi.middleware.cors import CORSMiddleware
-from config.observability import RateLimiter, APIKeyManager
+from config.observability import RateLimiter, APIKeyManager, track_metrics, get_metrics
 from pydantic import BaseModel
 from typing import Optional, List
 import uvicorn
@@ -21,6 +23,10 @@ app = FastAPI(
     version=VERSION
 )
 
+
+def run_server(host: str = "0.0.0.0", port: int = 8000):
+    uvicorn.run(app, host=host, port=port)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,6 +37,10 @@ app.add_middleware(
 
 API_KEY_ENV = os.getenv("MITO_API_KEY")
 API_KEY_HEADER = "X-API-Key"
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
+JWT_ISSUER = os.getenv("MITO_JWT_ISSUER")
+JWT_AUDIENCE = os.getenv("MITO_JWT_AUDIENCE")
+JWT_PUBLIC_KEY = os.getenv("MITO_JWT_PUBLIC_KEY")
 api_keys = APIKeyManager()
 limiter = RateLimiter(rate=int(os.getenv("MITO_RATE_LIMIT", "120")), period=60)
 if API_KEY_ENV:
@@ -51,6 +61,19 @@ def enforce_rate_limit(request: Request):
     if not limiter.allow(key):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
     return None
+
+def validate_jwt(token: str = Depends(oauth2_scheme)):
+    if API_KEY_ENV is None:
+        return token  # allow passthrough when API key is disabled
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    if JWT_PUBLIC_KEY:
+        try:
+            claims = jwt.decode(token, JWT_PUBLIC_KEY, algorithms=["RS256"], audience=JWT_AUDIENCE, issuer=JWT_ISSUER)
+            return claims
+        except JWTError as e:
+            raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+    return token
 
 
 
@@ -117,9 +140,15 @@ def list_tools():
         ]
     }
 
+@app.get("/metrics")
+def metrics():
+    return Response(get_metrics(), media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
 
 @app.post("/generate")
-def generate(req: GenerateRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
+@track_metrics(endpoint="generate", method="POST")
+def generate(req: GenerateRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit), token: str = Depends(validate_jwt)):
     try:
         from python.ai import TextGenerator
         
@@ -132,7 +161,8 @@ def generate(req: GenerateRequest, api_key: str = Depends(require_api_key), _rl:
 
 
 @app.post("/summarize")
-def summarize(req: SummarizeRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
+@track_metrics(endpoint="summarize", method="POST")
+def summarize(req: SummarizeRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit), token: str = Depends(validate_jwt)):
     try:
         from python.ai.summarize import Summarizer
         
@@ -145,7 +175,8 @@ def summarize(req: SummarizeRequest, api_key: str = Depends(require_api_key), _r
 
 
 @app.post("/translate")
-def translate(req: TranslateRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
+@track_metrics(endpoint="translate", method="POST")
+def translate(req: TranslateRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit), token: str = Depends(validate_jwt)):
     try:
         from python.ai.translate import Translator
         
@@ -158,7 +189,8 @@ def translate(req: TranslateRequest, api_key: str = Depends(require_api_key), _r
 
 
 @app.post("/qa")
-def question_answer(req: QARequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
+@track_metrics(endpoint="qa", method="POST")
+def question_answer(req: QARequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit), token: str = Depends(validate_jwt)):
     try:
         from python.ai.qa import QAModel
         
@@ -171,7 +203,8 @@ def question_answer(req: QARequest, api_key: str = Depends(require_api_key), _rl
 
 
 @app.post("/sentiment")
-def sentiment(req: SentimentRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
+@track_metrics(endpoint="sentiment", method="POST")
+def sentiment(req: SentimentRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit), token: str = Depends(validate_jwt)):
     try:
         from python.ai.sentiment import quick_sentiment, quick_emotion
         
@@ -188,7 +221,8 @@ def sentiment(req: SentimentRequest, api_key: str = Depends(require_api_key), _r
 
 
 @app.post("/embed")
-def embed(req: EmbedRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
+@track_metrics(endpoint="embed", method="POST")
+def embed(req: EmbedRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit), token: str = Depends(validate_jwt)):
     try:
         from python.ai.embeddings import Embedder
         
@@ -202,7 +236,8 @@ def embed(req: EmbedRequest, api_key: str = Depends(require_api_key), _rl: None 
 
 
 @app.post("/ocr")
-async def ocr(file: UploadFile = File(...), api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
+@track_metrics(endpoint="ocr", method="POST")
+async def ocr(file: UploadFile = File(...), api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit), token: str = Depends(validate_jwt)):
     tmp_path = None
     try:
         from python.ai.ocr import OCREngine
@@ -221,7 +256,8 @@ async def ocr(file: UploadFile = File(...), api_key: str = Depends(require_api_k
 
 
 @app.post("/classify")
-async def classify(file: UploadFile = File(...), api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
+@track_metrics(endpoint="classify", method="POST")
+async def classify(file: UploadFile = File(...), api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit), token: str = Depends(validate_jwt)):
     tmp_path = None
     try:
         from python.ai.image_classify import ImageClassifier
@@ -240,7 +276,8 @@ async def classify(file: UploadFile = File(...), api_key: str = Depends(require_
 
 
 @app.post("/speech")
-async def speech(file: UploadFile = File(...), api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
+@track_metrics(endpoint="speech", method="POST")
+async def speech(file: UploadFile = File(...), api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit), token: str = Depends(validate_jwt)):
     tmp_path = None
     try:
         from python.ai.speech import SpeechRecognizer
@@ -259,7 +296,8 @@ async def speech(file: UploadFile = File(...), api_key: str = Depends(require_ap
 
 
 @app.post("/tts")
-def tts(req: TTSRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit)):
+@track_metrics(endpoint="tts", method="POST")
+def tts(req: TTSRequest, api_key: str = Depends(require_api_key), _rl: None = Depends(enforce_rate_limit), token: str = Depends(validate_jwt)):
     try:
         from python.ai.tts import TTSEngine
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:

@@ -23,6 +23,7 @@ class ImageClassifier:
         self.device = device
         self.pipeline = None
         self.classifier = None
+        self.torch = None
     
     def _get_pipeline(self):
         """Lazy load the classification pipeline."""
@@ -30,6 +31,7 @@ class ImageClassifier:
             try:
                 from transformers import AutoImageProcessor, AutoModelForImageClassification
                 import torch
+                self.torch = torch
                 from PIL import Image
                 
                 self.Image = Image
@@ -73,7 +75,7 @@ class ImageClassifier:
         inputs = self.processor(images=image, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         
-        with torch.no_grad():
+        with self.torch.no_grad():
             outputs = self.classifier(**inputs)
         
         probs = outputs.logits.softmax(dim=-1)
@@ -110,7 +112,7 @@ class ImageClassifier:
         inputs = self.processor(images=image, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         
-        with torch.no_grad():
+        with self.torch.no_grad():
             outputs = self.classifier(**inputs)
         
         probs = outputs.logits.softmax(dim=-1)
