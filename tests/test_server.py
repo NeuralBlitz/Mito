@@ -34,3 +34,13 @@ class TestCLI:
             content = f.read()
         assert "VERSION" in content
         assert "argparse" in content
+
+    def test_generate_request_is_registered_as_body(self):
+        """Metrics decoration must preserve FastAPI's request signature."""
+        from fastapi.routing import APIRoute
+        from server.api import app
+        route = next(
+            route for route in app.routes
+            if isinstance(route, APIRoute) and route.path == "/generate"
+        )
+        assert [param.name for param in route.dependant.body_params] == ["req"]

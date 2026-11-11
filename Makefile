@@ -30,12 +30,12 @@ clean:
 run: $(TARGET)
 	./$(TARGET) -m model.gguf
 
-test:
-	@echo "Running C++ version check..."
+test: $(TARGET)
+	@echo "Running C++ version and help checks..."
 	./$(TARGET) -v
 	./$(TARGET) -h
-	@echo "Running Python tests..."
-	PYTHONPATH=$(PWD)/.pythonlibs/lib/python3.11/site-packages:$(PYTHONPATH) python -m pytest tests/ -v 2>/dev/null || echo "pytest not installed, skipping"
+	@echo "Running Python tests (failures are not ignored)..."
+	PYTHONPATH=$(CURDIR) python3 -m pytest tests/ -v
 
 install-deps:
 	@echo "To install llama.cpp, run:"
