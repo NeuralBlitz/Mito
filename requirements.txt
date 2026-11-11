@@ -10,7 +10,7 @@ llama-cpp-python>=0.1.0
 
 # Vision
 torchvision>=0.15.0
-pillow>=9.0.0
+pillow>=13.0.0
 
 # OCR
 easyocr>=1.7.0
