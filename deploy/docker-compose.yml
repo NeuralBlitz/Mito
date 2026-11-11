@@ -1,41 +1,22 @@
-version: '3.8'
-
 services:
   mito-api:
-    build: 
-      context: .
+    build:
+      # Compose resolves these paths relative to deploy/docker-compose.yml.
+      context: ..
       dockerfile: deploy/Dockerfile
     ports:
-      - "8000:8000"
+      # Local-only default until API authentication has been hardened.
+      - "127.0.0.1:8000:8000"
     environment:
       - MITO_HOME=/app
       - PYTHONUNBUFFERED=1
     volumes:
-      - ./models:/app/models
-      - ./data:/app/data
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 8G
-        reservations:
-          memory: 2G
-
-  mito-worker:
-    build:
-      context: .
-      dockerfile: deploy/Dockerfile
-    command: ["python", "-m", "mito", "worker"]
-    environment:
-      - MITO_HOME=/app
-      - PYTHONUNBUFFERED=1
-    volumes:
-      - ./models:/app/models
-      - ./data:/app/data
-    depends_on:
-      - mito-api
+      - ../models:/app/models
+      - ../data:/app/data
     restart: unless-stopped
 
+# The former mito-worker referenced a nonexistent "python -m mito worker"
+# entry point. Reintroduce the service only when a worker is implemented.
 networks:
   default:
     name: mito-network
