@@ -108,3 +108,64 @@ def test_token_refresh_rejects_invalid_bearer(monkeypatch):
     assert client.post("/token/refresh", headers=headers).status_code == 401
     headers["Authorization"] = "Bearer invalid"
     assert client.post("/token/refresh", headers=headers).status_code == 401
+
+
+def test_refresh_preserves_initial_auth_time_and_session_deadline(monkeypatch):
+    monkeypatch.setattr(api, "API_KEY_ENV", "key")
+    monkeypatch.setattr(api, "JWT_SECRET", "secret")
+    monkeypatch.setattr(api, "JWT_MAX_SESSION_AGE", 120)
+    monkeypatch.setattr(api, "JWT_REFRESH_TTL", 90)
+    monkeypatch.setattr(api.time, "time", lambda: 1_700_000_000)
+    initial, exp = api._issue_token("alice", ["read"], ttl=100)
+    assert exp == 1_700_000_100
+    client = TestClient(api.app)
+    monkeypatch.setattr(api.time, "time", lambda: 1_700_000_060)
+    response = client.post("/token/refresh", headers={
+        "X-API-Key": "key", "Authorization": "Bearer " + initial,
+    })
+    assert response.status_code == 200, response.text
+    refreshed = jwt.decode(response.json()["access_token"], "secret", algorithms=["HS256"])
+    assert refreshed["auth_time"] == 1_700_000_000
+    assert refreshed["exp"] == 1_700_000_120
+    assert refreshed["iat"] == 1_700_000_060
+
+
+def test_refresh_denies_expired_session_even_if_bearer_signature_valid(monkeypatch):
+    monkeypatch.setattr(api, "API_KEY_ENV", "key")
+    monkeypatch.setattr(api, "JWT_SECRET", "secret")
+    monkeypatch.setattr(api, "JWT_MAX_SESSION_AGE", 120)
+    monkeypatch.setattr(api.time, "time", lambda: 1_700_000_300)
+    # The bearer remains valid but its original login is too old for renewal.
+    bearer = jwt.encode({
+        "sub": "alice", "iat": 1_700_000_290,
+        "auth_time": 1_700_000_000, "exp": 1_700_000_350,
+    }, "secret", algorithm="HS256")
+    response = TestClient(api.app).post("/token/refresh", headers={
+        "X-API-Key": "key", "Authorization": "Bearer " + bearer,
+    })
+    assert response.status_code == 401
+    assert "Session expired" in response.json()["detail"]
+
+
+def test_refresh_denies_tokens_without_initial_session_age(monkeypatch):
+    monkeypatch.setattr(api, "API_KEY_ENV", "key")
+    monkeypatch.setattr(api, "JWT_SECRET", "secret")
+    bearer = jwt.encode({
+        "sub": "alice", "exp": int(time.time()) + 600,
+    }, "secret", algorithm="HS256")
+    response = TestClient(api.app).post("/token/refresh", headers={
+        "X-API-Key": "key", "Authorization": "Bearer " + bearer,
+    })
+    assert response.status_code == 401
+
+
+def test_inference_endpoint_requires_key_and_bearer_before_model_loading(monkeypatch):
+    monkeypatch.setattr(api, "API_KEY_ENV", "key")
+    monkeypatch.setattr(api, "JWT_SECRET", "secret")
+    client = TestClient(api.app)
+    assert client.post("/generate", json={"prompt": "test"}).status_code == 401
+    assert client.post("/generate", headers={"X-API-Key": "key"},
+                       json={"prompt": "test"}).status_code == 401
+    assert client.post("/generate", headers={
+        "X-API-Key": "key", "Authorization": "Bearer invalid",
+    }, json={"prompt": "test"}).status_code == 401
