@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from collections import defaultdict
 import threading
+from functools import wraps
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
 
 
@@ -145,6 +146,7 @@ def rate_limit(get_key: Callable[[], Optional[str]], limiter: RateLimiter):
 def track_metrics(endpoint: str, method: str = "GET"):
     """Decorator to track metrics."""
     def decorator(func):
+        @wraps(func)
         def wrapper(*args, **kwargs):
             start = time.time()
             try:
