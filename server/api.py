@@ -65,7 +65,10 @@ JWT_PRIVATE_KEY = os.getenv("MITO_JWT_PRIVATE_KEY")
 JWT_SECRET = os.getenv("MITO_JWT_SECRET")
 JWT_PASSWORD = os.getenv("MITO_JWT_PASSWORD")
 JWT_USERS = os.getenv("MITO_JWT_USERS")
-JWT_REFRESH_TTL = int(os.getenv("MITO_JWT_REFRESH_TTL", "86400"))
+JWT_REFRESH_TTL = int(os.getenv("MITO_JWT_REFRESH_TTL", "3600"))
+JWT_MAX_SESSION_AGE = int(os.getenv("MITO_JWT_MAX_SESSION_AGE", "86400"))
+if JWT_REFRESH_TTL < 1 or JWT_MAX_SESSION_AGE < 1:
+    raise RuntimeError("JWT refresh TTL and max session age must be positive")
 api_keys = APIKeyManager()
 limiter = RateLimiter(rate=int(os.getenv("MITO_RATE_LIMIT", "120")), period=60)
 if API_KEY_ENV:
@@ -147,10 +150,24 @@ def _verify_credentials(username: str, password: str) -> bool:
         return False
 
 
-def _issue_token(sub: str, scopes, ttl: int = None):
+def _issue_token(sub: str, scopes, ttl: int = None, auth_time: int = None):
     now = int(time.time())
-    exp = now + (ttl or int(os.getenv("MITO_JWT_TTL", "3600")))
-    payload = {"sub": sub, "scope": scopes, "iat": now, "exp": exp}
+    # Refreshing a token must never turn one login into an unbounded session.
+    # auth_time is preserved across refreshes, and cannot be supplied by clients.
+    initial_auth_time = now if auth_time is None else auth_time
+    if type(initial_auth_time) is not int or initial_auth_time > now:
+        raise HTTPException(status_code=401, detail="Invalid session")
+    session_deadline = initial_auth_time + JWT_MAX_SESSION_AGE
+    requested_ttl = int(os.getenv("MITO_JWT_TTL", "3600")) if ttl is None else ttl
+    if type(requested_ttl) is not int or requested_ttl < 1:
+        raise HTTPException(status_code=503, detail="Invalid token TTL")
+    exp = min(now + requested_ttl, session_deadline)
+    if exp <= now:
+        raise HTTPException(status_code=401, detail="Session expired; authenticate again")
+    payload = {
+        "sub": sub, "scope": scopes, "iat": now, "auth_time": initial_auth_time,
+        "exp": exp,
+    }
     if JWT_ISSUER:
         payload["iss"] = JWT_ISSUER
     if JWT_AUDIENCE:
@@ -222,7 +239,10 @@ async def token_refresh(claims: dict = Depends(validate_jwt), api_key: str = Dep
     scopes = claims.get("scope", []) if isinstance(claims, dict) else []
     if not sub:
         raise HTTPException(status_code=400, detail="Missing subject in token")
-    token, exp = _issue_token(sub, scopes, ttl=JWT_REFRESH_TTL)
+    auth_time = claims.get("auth_time", claims.get("iat")) if isinstance(claims, dict) else None
+    if type(auth_time) is not int:
+        raise HTTPException(status_code=401, detail="Session age unavailable; authenticate again")
+    token, exp = _issue_token(sub, scopes, ttl=JWT_REFRESH_TTL, auth_time=auth_time)
     return {"access_token": token, "token_type": "bearer", "expires_in": exp - int(time.time())}
 
 
