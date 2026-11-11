@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "npm@10.9.4",
   "dependencies": {
-    "openclaw": "^2026.4.15",
+    "openclaw": "^2026.11.3",
     "pipx": "^1.0.1"
   }
 }
