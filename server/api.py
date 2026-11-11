@@ -16,6 +16,8 @@ import os
 import base64
 import json
 import time
+import hmac
+import hashlib
 
 VERSION = "1.0.0"
 
@@ -29,16 +31,32 @@ app = FastAPI(
 def run_server(host: str = "0.0.0.0", port: int = 8000):
     uvicorn.run(app, host=host, port=port)
 
+# Cross-origin browser access is disabled unless a trusted origin is explicitly set.
+CORS_ORIGINS = [
+    origin.strip() for origin in os.getenv("MITO_CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=bool(CORS_ORIGINS),
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
 
 API_KEY_ENV = os.getenv("MITO_API_KEY")
 API_KEY_HEADER = "X-API-Key"
+AUTH_MODE = os.getenv("MITO_AUTH_MODE", "strict").strip().lower()
+if AUTH_MODE not in {"strict", "development"}:
+    raise RuntimeError("MITO_AUTH_MODE must be strict or development")
+
+def _development_local_request(request: Request) -> bool:
+    """Only explicitly opted-in development requests from loopback bypass auth."""
+    return (
+        AUTH_MODE == "development"
+        and request.client is not None
+        and request.client.host in {"127.0.0.1", "::1"}
+    )
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token", auto_error=False)
 JWT_ISSUER = os.getenv("MITO_JWT_ISSUER")
 JWT_AUDIENCE = os.getenv("MITO_JWT_AUDIENCE")
@@ -56,12 +74,14 @@ if API_KEY_ENV:
     api_keys.keys[API_KEY_ENV] = api_keys.keys.pop(list(api_keys.keys.keys())[0])
 
 def require_api_key(request: Request):
-    if API_KEY_ENV:
-        key = request.headers.get(API_KEY_HEADER)
-        if not key or not api_keys.validate_key(key):
-            raise HTTPException(status_code=401, detail="Invalid or missing API key")
-        return key
-    return None
+    if _development_local_request(request):
+        return None
+    if not API_KEY_ENV:
+        raise HTTPException(status_code=503, detail="API key authentication is not configured")
+    key = request.headers.get(API_KEY_HEADER) or ""
+    if not hmac.compare_digest(key, API_KEY_ENV):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    return key
 
 def enforce_rate_limit(request: Request):
     key = request.headers.get(API_KEY_HEADER) or "anonymous"
@@ -69,31 +89,62 @@ def enforce_rate_limit(request: Request):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
     return None
 
-def validate_jwt(token: Optional[str] = Depends(oauth2_scheme)):
-    if API_KEY_ENV is None:
-        return token  # allow passthrough when API key is disabled
+def validate_jwt(request: Request, token: Optional[str] = Depends(oauth2_scheme)):
+    if _development_local_request(request) and not token:
+        return None
+    if not JWT_PUBLIC_KEY and not JWT_SECRET:
+        raise HTTPException(status_code=503, detail="JWT verification is not configured")
     if not token:
         raise HTTPException(status_code=401, detail="Missing bearer token")
     try:
         if JWT_PUBLIC_KEY:
-            return jwt.decode(token, JWT_PUBLIC_KEY, algorithms=["RS256"], audience=JWT_AUDIENCE, issuer=JWT_ISSUER)
-        if JWT_SECRET:
-            return jwt.decode(token, JWT_SECRET, algorithms=["HS256"], audience=JWT_AUDIENCE, issuer=JWT_ISSUER)
-    except JWTError as e:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
-    return token
+            claims = jwt.decode(
+                token, JWT_PUBLIC_KEY, algorithms=["RS256"],
+                audience=JWT_AUDIENCE, issuer=JWT_ISSUER,
+                options={"require_exp": True, "require_sub": True},
+            )
+        else:
+            claims = jwt.decode(
+                token, JWT_SECRET, algorithms=["HS256"],
+                audience=JWT_AUDIENCE, issuer=JWT_ISSUER,
+                options={"require_exp": True, "require_sub": True},
+            )
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid bearer token")
+    if not isinstance(claims.get("sub"), str) or not claims["sub"]:
+        raise HTTPException(status_code=401, detail="Invalid bearer token")
+    return claims
 
 
 def _verify_credentials(username: str, password: str) -> bool:
-    if JWT_USERS:
-        try:
-            users = json.loads(JWT_USERS)
-            return users.get(username) == password
-        except Exception:
+    """Require PBKDF2-SHA256 password hashes; no implicit or plaintext fallback.
+
+    MITO_JWT_USERS JSON mapping format:
+    {"alice": "pbkdf2_sha256$260000$<hex-salt>$<hex-derived-key>"}
+    """
+    if not JWT_USERS or not username or not password:
+        return False
+    try:
+        users = json.loads(JWT_USERS)
+        if not isinstance(users, dict):
             return False
-    if JWT_PASSWORD:
-        return password == JWT_PASSWORD
-    return True  # allow when no credential config provided
+        stored = users.get(username)
+        if not isinstance(stored, str):
+            return False
+        algorithm, iterations_str, salt_hex, digest_hex = stored.split("$")
+        iterations = int(iterations_str)
+        salt = bytes.fromhex(salt_hex)
+        digest = bytes.fromhex(digest_hex)
+        if algorithm != "pbkdf2_sha256" or iterations < 200_000:
+            return False
+        if iterations > 2_000_000 or len(salt) < 16 or len(digest) != 32:
+            return False
+        supplied = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), salt, iterations, dklen=32
+        )
+        return hmac.compare_digest(supplied, digest)
+    except (ValueError, TypeError, KeyError):
+        return False
 
 
 def _issue_token(sub: str, scopes, ttl: int = None):
@@ -177,7 +228,7 @@ async def token_refresh(claims: dict = Depends(validate_jwt), api_key: str = Dep
 
 
 @app.get("/tools")
-def list_tools():
+def list_tools(_api_key: Optional[str] = Depends(require_api_key)):
     return {
         "tools": [
             {"name": "llama", "description": "Llama LLM inference"},
@@ -195,7 +246,7 @@ def list_tools():
     }
 
 @app.get("/metrics")
-def metrics():
+def metrics(_api_key: Optional[str] = Depends(require_api_key)):
     return Response(get_metrics(), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
