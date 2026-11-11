@@ -36,7 +36,14 @@ and the legacy `MITO_JWT_PASSWORD` setting are not accepted.
 Use `POST /token` with the API key and OAuth2 password form to obtain a JWT;
 the token is then used with the API key on inference requests. `POST
 /token/refresh` requires an existing valid JWT and the API key. Issued
-bearer tokens expire; clients must refresh or authenticate again.
+bearer tokens expire; clients must refresh or authenticate again. Refreshing
+preserves the original login timestamp (`auth_time`) and cannot extend a
+session beyond `MITO_JWT_MAX_SESSION_AGE` (default: 86400 seconds / 24 hours).
+The refresh token lifetime is bounded by `MITO_JWT_REFRESH_TTL` (default:
+3600 seconds / one hour) and by the remaining session age. Older issued
+tokens with a signed `iat` claim can refresh within the same session limit;
+tokens without a trustworthy initial timestamp must reauthenticate.
+Set these intervals according to your threat model and deployment policy.
 
 For local debugging only, set `MITO_AUTH_MODE=development` explicitly.
 Authentication bypass applies **only** when the direct request client is
