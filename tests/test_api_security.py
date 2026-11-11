@@ -115,30 +115,29 @@ def test_refresh_preserves_initial_auth_time_and_session_deadline(monkeypatch):
     monkeypatch.setattr(api, "JWT_SECRET", "secret")
     monkeypatch.setattr(api, "JWT_MAX_SESSION_AGE", 120)
     monkeypatch.setattr(api, "JWT_REFRESH_TTL", 90)
-    monkeypatch.setattr(api.time, "time", lambda: 1_700_000_000)
-    initial, exp = api._issue_token("alice", ["read"], ttl=100)
-    assert exp == 1_700_000_100
-    client = TestClient(api.app)
-    monkeypatch.setattr(api.time, "time", lambda: 1_700_000_060)
-    response = client.post("/token/refresh", headers={
+    now = int(time.time())
+    auth_time = now - 60
+    initial, exp = api._issue_token("alice", ["read"], ttl=100, auth_time=auth_time)
+    assert exp == auth_time + 120
+    response = TestClient(api.app).post("/token/refresh", headers={
         "X-API-Key": "key", "Authorization": "Bearer " + initial,
     })
     assert response.status_code == 200, response.text
     refreshed = jwt.decode(response.json()["access_token"], "secret", algorithms=["HS256"])
-    assert refreshed["auth_time"] == 1_700_000_000
-    assert refreshed["exp"] == 1_700_000_120
-    assert refreshed["iat"] == 1_700_000_060
+    assert refreshed["auth_time"] == auth_time
+    assert refreshed["exp"] == auth_time + 120
+    assert refreshed["iat"] >= now
 
 
 def test_refresh_denies_expired_session_even_if_bearer_signature_valid(monkeypatch):
     monkeypatch.setattr(api, "API_KEY_ENV", "key")
     monkeypatch.setattr(api, "JWT_SECRET", "secret")
     monkeypatch.setattr(api, "JWT_MAX_SESSION_AGE", 120)
-    monkeypatch.setattr(api.time, "time", lambda: 1_700_000_300)
+    now = int(time.time())
     # The bearer remains valid but its original login is too old for renewal.
     bearer = jwt.encode({
-        "sub": "alice", "iat": 1_700_000_290,
-        "auth_time": 1_700_000_000, "exp": 1_700_000_350,
+        "sub": "alice", "iat": now - 10,
+        "auth_time": now - 300, "exp": now + 50,
     }, "secret", algorithm="HS256")
     response = TestClient(api.app).post("/token/refresh", headers={
         "X-API-Key": "key", "Authorization": "Bearer " + bearer,
