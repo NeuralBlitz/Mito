@@ -34,3 +34,17 @@ jobs:
         run: python -m compileall -q server config agents tests
       - name: Validate API imports and FastAPI route signatures
         run: python -m pytest tests/test_server.py tests/test_api_security.py -q
+
+  node-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - name: Validate root npm lockfile and install
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Validate desktop npm lockfile and install
+        working-directory: desktop
+        run: npm ci --ignore-scripts --no-audit --no-fund
