@@ -48,3 +48,6 @@ jobs:
       - name: Validate desktop npm lockfile and install
         working-directory: desktop
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build desktop production assets
+        working-directory: desktop
+        run: npm run build
