@@ -13,7 +13,7 @@ torchvision>=0.15.0
 pillow>=13.0.0
 
 # OCR
-easyocr>=1.7.0
+easyocr>=1.7.2
 
 # NLP & Embeddings
 sentence-transformers>=2.2.0
